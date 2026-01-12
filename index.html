@@ -30,7 +30,8 @@ header{
 .grid{display:grid;gap:20px;}
 .note{background:var(--card);border-radius:14px;box-shadow:0 8px 20px rgba(0,0,0,.1);overflow:hidden;}
 .note-header{padding:15px;background:var(--accent);color:white;cursor:pointer;}
-.note-content{padding:15px;display:none;}
+.note-content{padding:15px;}
+.note-content[hidden]{display:none;}
 .subject{font-size:13px;opacity:.9;}
 button{background:var(--accent);border:none;color:white;padding:10px;border-radius:8px;cursor:pointer;margin-top:10px;}
 input,textarea,select{width:100%;padding:10px;margin-top:10px;border-radius:8px;border:1px solid #ccc;}
@@ -55,7 +56,7 @@ input,textarea,select{width:100%;padding:10px;margin-top:10px;border-radius:8px;
   <option value="student">Student</option>
   <option value="admin">Admin</option>
 </select>
-<input type="password" id="password" placeholder="Admin password">
+<input type="password" id="password" placeholder="Admin password" style="display:none">
 <button onclick="login()">Login</button>
 </div>
 
@@ -98,30 +99,27 @@ input,textarea,select{width:100%;padding:10px;margin-top:10px;border-radius:8px;
 </div>
 
 <script>
-const ADMIN_PASS="admin123";
-let notes=JSON.parse(localStorage.getItem("notes"))||[];
+const ADMIN_PASS = "admin123";
+let notes = JSON.parse(localStorage.getItem("notes")) || [];
 
+// Service worker for offline
 if("serviceWorker" in navigator){
   navigator.serviceWorker.register("service-worker.js");
 }
 
-// Hide password box if student
+// Hide/show password for student/admin
 document.getElementById("role").addEventListener("change", function(){
   const pass = document.getElementById("password");
-  if(this.value === "student"){
-    pass.style.display = "none";
-  } else {
-    pass.style.display = "block";
-  }
+  pass.style.display = this.value === "admin" ? "block" : "none";
 });
 
-// Save notes to localStorage
-function save(){localStorage.setItem("notes",JSON.stringify(notes));}
+// Save notes
+function save(){ localStorage.setItem("notes", JSON.stringify(notes)); }
 
-// Login logic
+// Login
 function login(){
   const role = document.getElementById("role").value;
-  const pass = document.getElementById("password").value;
+  const pass = document.getElementById("password").value.trim();
 
   if(role === "student"){
     document.getElementById("controls").classList.remove("hidden");
@@ -143,31 +141,45 @@ function login(){
 
 // Add text note
 function addNote(){
-  const s=document.getElementById("subject").value;
-  const c=document.getElementById("chapter").value;
-  const t=document.getElementById("content").value;
-  if(!s||!c||!t){alert("Fill all fields");return;}
-  notes.unshift({subject:s,chapter:c,content:t});
-  save();renderNotes();
+  const subject = document.getElementById("subject").value.trim();
+  const chapter = document.getElementById("chapter").value.trim();
+  const content = document.getElementById("content").value.trim();
+
+  if(!subject || !chapter || !content){
+    alert("Fill all fields");
+    return;
+  }
+
+  notes.unshift({subject, chapter, content});
+  save();
+  renderNotes();
   document.getElementById("subject").value="";
   document.getElementById("chapter").value="";
   document.getElementById("content").value="";
 }
 
-// Upload PDF note
+// Upload PDF
 function uploadPDF(){
-  const fileInput=document.getElementById("pdfFile");
-  const subject=document.getElementById("subject").value;
-  const chapter=document.getElementById("chapter").value;
-  const file=fileInput.files[0];
+  const fileInput = document.getElementById("pdfFile");
+  const subject = document.getElementById("subject").value.trim();
+  const chapter = document.getElementById("chapter").value.trim();
+  const file = fileInput.files[0];
 
-  if(!file||!subject||!chapter){alert("Select PDF, subject, and chapter!");return;}
+  if(!file || !subject || !chapter){
+    alert("Select PDF, subject, and chapter!");
+    return;
+  }
 
-  const reader=new FileReader();
-  reader.onload=function(e){
-    const pdfData=e.target.result;
-    notes.unshift({subject,chapter,pdf:pdfData});
-    save();renderNotes();
+  if(file.size > 5 * 1024 * 1024){ // 5MB limit warning
+    alert("Warning: PDF is large. It may not save in localStorage.");
+  }
+
+  const reader = new FileReader();
+  reader.onload = function(e){
+    const pdfData = e.target.result;
+    notes.unshift({subject, chapter, pdf: pdfData});
+    save();
+    renderNotes();
     fileInput.value="";
     document.getElementById("chapter").value="";
     document.getElementById("subject").value="";
@@ -177,61 +189,73 @@ function uploadPDF(){
 
 // Render notes
 function renderNotes(){
-  const f=document.getElementById("filter").value;
-  const q=document.getElementById("search").value.toLowerCase();
-  const div=document.getElementById("notes");
-  div.innerHTML="";
+  const filter = document.getElementById("filter").value;
+  const query = document.getElementById("search").value.toLowerCase();
+  const div = document.getElementById("notes");
+  div.innerHTML = "";
 
-  notes.filter(n=>
-    (f==="All"||n.subject===f)&&
-    ((n.chapter.toLowerCase().includes(q)) || (n.content && n.content.toLowerCase().includes(q)))
-  ).forEach(n=>{
-    const d=document.createElement("div");
-    d.className="note";
+  notes.filter(n => 
+    (filter === "All" || n.subject === filter) &&
+    ((n.chapter.toLowerCase().includes(query)) || (n.content && n.content.toLowerCase().includes(query)))
+  ).forEach(n => {
+    const noteDiv = document.createElement("div");
+    noteDiv.className = "note";
+
     if(n.pdf){
-      d.innerHTML=`
-      <div class="note-header" onclick="this.nextElementSibling.classList.toggle('hidden')">
-        <div class="subject">${n.subject}</div><strong>${n.chapter}</strong>
-      </div>
-      <div class="note-content hidden">
+      // PDF Note
+      noteDiv.innerHTML = `
+      <div class="note-header">${n.subject} - <strong>${n.chapter}</strong></div>
+      <div class="note-content" hidden>
         <p>PDF Note</p>
-        <button onclick="downloadPDFFile('${n.pdf}','${n.chapter}.pdf')">⬇ Download PDF</button>
+        <button onclick="downloadPDFFile('${encodeURIComponent(n.pdf)}','${n.chapter}.pdf')">⬇ Download PDF</button>
       </div>`;
     } else {
-      d.innerHTML=`
-      <div class="note-header" onclick="this.nextElementSibling.classList.toggle('hidden')">
-        <div class="subject">${n.subject}</div><strong>${n.chapter}</strong>
-      </div>
-      <div class="note-content hidden">
+      // Text Note
+      noteDiv.innerHTML = `
+      <div class="note-header">${n.subject} - <strong>${n.chapter}</strong></div>
+      <div class="note-content" hidden>
         <p>${n.content}</p>
-        <button onclick='downloadPDF(${JSON.stringify(n)})'>⬇ Download PDF</button>
+        <button onclick='downloadTextPDF(${JSON.stringify(n)})'>⬇ Download PDF</button>
       </div>`;
     }
-    div.appendChild(d);
+
+    // Toggle content
+    noteDiv.querySelector(".note-header").addEventListener("click", function(){
+      const contentDiv = this.nextElementSibling;
+      contentDiv.hidden = !contentDiv.hidden;
+    });
+
+    div.appendChild(noteDiv);
   });
 }
 
 // Download text note as PDF
-function downloadPDF(n){
-  const {jsPDF}=window.jspdf;
-  const doc=new jsPDF();
-  doc.text(n.chapter,10,15);
-  doc.text("Subject: "+n.subject,10,25);
-  doc.text(n.content,10,35,{maxWidth:180});
-  doc.save(n.chapter+".pdf");
+function downloadTextPDF(n){
+  const {jsPDF} = window.jspdf;
+  const doc = new jsPDF();
+  doc.setFontSize(16);
+  doc.text(n.chapter, 10, 15);
+  doc.setFontSize(12);
+  doc.text("Subject: " + n.subject, 10, 25);
+  const contentLines = doc.splitTextToSize(n.content, 180);
+  doc.text(contentLines, 10, 35);
+  doc.save(n.chapter + ".pdf");
 }
 
-// Download uploaded PDF
-function downloadPDFFile(base64,fileName){
-  const link=document.createElement("a");
-  link.href=base64;
-  link.download=fileName;
+// Download PDF file
+function downloadPDFFile(base64, fileName){
+  const link = document.createElement("a");
+  link.href = decodeURIComponent(base64);
+  link.download = fileName;
   link.click();
 }
 
 // Dark mode toggle
-function toggleDark(){document.body.classList.toggle("dark");}
+function toggleDark(){
+  document.body.classList.toggle("dark");
+}
 
+// Initial render
 renderNotes();
 </script>
 </body>
