@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Notes Hub</title>
+
+<link rel="manifest" href="manifest.json">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+<style>
+:root{
+  --bg:#f2f6f9; --card:#fff; --text:#222; --accent:#3cb371;
+}
+.dark{
+  --bg:#0f172a; --card:#1e293b; --text:#f8fafc; --accent:#4ade80;
+}
+body{
+  margin:0;font-family:Segoe UI,Arial;background:var(--bg);color:var(--text);transition:.3s;
+}
+header{
+  background:linear-gradient(135deg,#2e8b57,#3cb371);
+  color:white;padding:30px;text-align:center;
+}
+.toggle{
+  position:fixed;top:15px;right:15px;border:none;background:var(--accent);color:white;padding:10px;border-radius:50%;cursor:pointer;
+}
+.container{max-width:1000px;margin:25px auto;padding:20px;}
+.card{background:var(--card);padding:20px;border-radius:14px;box-shadow:0 10px 25px rgba(0,0,0,.1);margin-bottom:25px;}
+.grid{display:grid;gap:20px;}
+.note{background:var(--card);border-radius:14px;box-shadow:0 8px 20px rgba(0,0,0,.1);overflow:hidden;}
+.note-header{padding:15px;background:var(--accent);color:white;cursor:pointer;}
+.note-content{padding:15px;display:none;}
+.subject{font-size:13px;opacity:.9;}
+button{background:var(--accent);border:none;color:white;padding:10px;border-radius:8px;cursor:pointer;margin-top:10px;}
+input,textarea,select{width:100%;padding:10px;margin-top:10px;border-radius:8px;border:1px solid #ccc;}
+.hidden{display:none;}
+</style>
+</head>
+
+<body>
+<button class="toggle" onclick="toggleDark()">🌙</button>
+
+<header>
+<h1>Notes Hub</h1>
+<p>Installable • Offline • Download PDFs</p>
+</header>
+
+<div class="container">
+
+<!-- LOGIN -->
+<div class="card">
+<h2>Login</h2>
+<select id="role">
+  <option value="student">Student</option>
+  <option value="admin">Admin</option>
+</select>
+<input type="password" id="password" placeholder="Admin password">
+<button onclick="login()">Login</button>
+</div>
+
+<!-- CONTROLS -->
+<div id="controls" class="card hidden">
+<input type="text" id="search" placeholder="Search notes..." oninput="renderNotes()">
+<select id="filter" onchange="renderNotes()">
+<option value="All">All Subjects</option>
+<option>Biology</option><option>Physics</option><option>Chemistry</option>
+<option>Mathematics</option><option>English</option><option>Social Science</option>
+</select>
+</div>
+
+<!-- NOTES GRID -->
+<div id="notes" class="grid"></div>
+
+<!-- ADMIN PANEL -->
+<div id="adminPanel" class="card hidden">
+<h2>Upload Notes (Admin)</h2>
+
+<!-- Text Notes -->
+<select id="subject">
+<option value="">Subject</option>
+<option>Biology</option><option>Physics</option><option>Chemistry</option>
+<option>Mathematics</option><option>English</option><option>Social Science</option>
+</select>
+<input type="text" id="chapter" placeholder="Chapter / Topic">
+<textarea id="content" placeholder="Write notes..."></textarea>
+<button onclick="addNote()">Publish Text Note</button>
+
+<hr>
+
+<!-- PDF Upload -->
+<h3>Upload PDF</h3>
+<input type="file" id="pdfFile" accept="application/pdf">
+<button onclick="uploadPDF()">Upload PDF Note</button>
+
+</div>
+
+</div>
+
+<script>
+const ADMIN_PASS="admin123";
+let notes=JSON.parse(localStorage.getItem("notes"))||[];
+
+if("serviceWorker" in navigator){
+  navigator.serviceWorker.register("service-worker.js");
+}
+
+// Hide password box if student
+document.getElementById("role").addEventListener("change", function(){
+  const pass = document.getElementById("password");
+  if(this.value === "student"){
+    pass.style.display = "none";
+  } else {
+    pass.style.display = "block";
+  }
+});
+
+// Save notes to localStorage
+function save(){localStorage.setItem("notes",JSON.stringify(notes));}
+
+// Login logic
+function login(){
+  const role = document.getElementById("role").value;
+  const pass = document.getElementById("password").value;
+
+  if(role === "student"){
+    document.getElementById("controls").classList.remove("hidden");
+    document.getElementById("adminPanel").classList.add("hidden");
+    renderNotes();
+    return;
+  }
+
+  if(role === "admin"){
+    if(pass !== ADMIN_PASS){
+      alert("Wrong admin password");
+      return;
+    }
+    document.getElementById("controls").classList.remove("hidden");
+    document.getElementById("adminPanel").classList.remove("hidden");
+    renderNotes();
+  }
+}
+
+// Add text note
+function addNote(){
+  const s=document.getElementById("subject").value;
+  const c=document.getElementById("chapter").value;
+  const t=document.getElementById("content").value;
+  if(!s||!c||!t){alert("Fill all fields");return;}
+  notes.unshift({subject:s,chapter:c,content:t});
+  save();renderNotes();
+  document.getElementById("subject").value="";
+  document.getElementById("chapter").value="";
+  document.getElementById("content").value="";
+}
+
+// Upload PDF note
+function uploadPDF(){
+  const fileInput=document.getElementById("pdfFile");
+  const subject=document.getElementById("subject").value;
+  const chapter=document.getElementById("chapter").value;
+  const file=fileInput.files[0];
+
+  if(!file||!subject||!chapter){alert("Select PDF, subject, and chapter!");return;}
+
+  const reader=new FileReader();
+  reader.onload=function(e){
+    const pdfData=e.target.result;
+    notes.unshift({subject,chapter,pdf:pdfData});
+    save();renderNotes();
+    fileInput.value="";
+    document.getElementById("chapter").value="";
+    document.getElementById("subject").value="";
+  };
+  reader.readAsDataURL(file);
+}
+
+// Render notes
+function renderNotes(){
+  const f=document.getElementById("filter").value;
+  const q=document.getElementById("search").value.toLowerCase();
+  const div=document.getElementById("notes");
+  div.innerHTML="";
+
+  notes.filter(n=>
+    (f==="All"||n.subject===f)&&
+    ((n.chapter.toLowerCase().includes(q)) || (n.content && n.content.toLowerCase().includes(q)))
+  ).forEach(n=>{
+    const d=document.createElement("div");
+    d.className="note";
+    if(n.pdf){
+      d.innerHTML=`
+      <div class="note-header" onclick="this.nextElementSibling.classList.toggle('hidden')">
+        <div class="subject">${n.subject}</div><strong>${n.chapter}</strong>
+      </div>
+      <div class="note-content hidden">
+        <p>PDF Note</p>
+        <button onclick="downloadPDFFile('${n.pdf}','${n.chapter}.pdf')">⬇ Download PDF</button>
+      </div>`;
+    } else {
+      d.innerHTML=`
+      <div class="note-header" onclick="this.nextElementSibling.classList.toggle('hidden')">
+        <div class="subject">${n.subject}</div><strong>${n.chapter}</strong>
+      </div>
+      <div class="note-content hidden">
+        <p>${n.content}</p>
+        <button onclick='downloadPDF(${JSON.stringify(n)})'>⬇ Download PDF</button>
+      </div>`;
+    }
+    div.appendChild(d);
+  });
+}
+
+// Download text note as PDF
+function downloadPDF(n){
+  const {jsPDF}=window.jspdf;
+  const doc=new jsPDF();
+  doc.text(n.chapter,10,15);
+  doc.text("Subject: "+n.subject,10,25);
+  doc.text(n.content,10,35,{maxWidth:180});
+  doc.save(n.chapter+".pdf");
+}
+
+// Download uploaded PDF
+function downloadPDFFile(base64,fileName){
+  const link=document.createElement("a");
+  link.href=base64;
+  link.download=fileName;
+  link.click();
+}
+
+// Dark mode toggle
+function toggleDark(){document.body.classList.toggle("dark");}
+
+renderNotes();
+</script>
+</body>
+</html>
